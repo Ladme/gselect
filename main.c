@@ -154,7 +154,7 @@ int main(int argc, char **argv)
         }
     }
 
-    print_arguments(stdout, gro_file, xtc_file, ndx_file, output_gro, output_xtc, selected);
+    if (xtc_file != NULL) print_arguments(stdout, gro_file, xtc_file, ndx_file, output_gro, output_xtc, selected);
 
     // read gro file
     system_t *system = load_gro(gro_file);
