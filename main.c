@@ -7,7 +7,7 @@
 // frequency of printing during the calculation
 static const int PROGRESS_FREQ = 10000;
 
-static const char VERSION[] = "v2022/08/31";
+static const char VERSION[] = "v2022/09/17";
 
 /*
  * Parses command line arguments.
@@ -20,12 +20,14 @@ int get_arguments(
         char **xtc_file,
         char **ndx_file,
         char **output_file,
-        char **selected) 
+        char **selected,
+        char **geometry_reference,
+        char **geometry_query) 
 {
-    int gro_specified = 0, selection_specified = 0;
+    int gro_specified = 0;
 
     int opt = 0;
-    while((opt = getopt(argc, argv, "c:f:n:o:s:h")) != -1) {
+    while((opt = getopt(argc, argv, "c:f:n:o:s:r:g:h")) != -1) {
         switch (opt) {
         // help
         case 'h':
@@ -50,7 +52,14 @@ int get_arguments(
         // selected atoms
         case 's':
             *selected = optarg;
-            selection_specified = 1;
+            break;
+        // reference atoms for geometry selection
+        case 'r':
+            *geometry_reference = optarg;
+            break;
+        // query for geometry selection
+        case 'g':
+            *geometry_query = optarg;
             break;
         default:
             //fprintf(stderr, "Unknown command line option: %c.\n", opt);
@@ -58,8 +67,8 @@ int get_arguments(
         }
     }
 
-    if (!gro_specified || !selection_specified) {
-        fprintf(stderr, "Selection and gro file must always be supplied.\n");
+    if (!gro_specified) {
+        fprintf(stderr, "Gro file must always be supplied.\n");
         return 1;
     }
     return 0;
@@ -67,14 +76,16 @@ int get_arguments(
 
 void print_usage(const char *program_name)
 {
-    printf("Usage: %s -c GRO_FILE -s SELECTION [OPTION]...\n", program_name);
+    printf("Usage: %s -c GRO_FILE [OPTION]...\n", program_name);
     printf("\nOPTIONS\n");
     printf("-h               print this message and exit\n");
     printf("-c STRING        gro file to read\n");
-    printf("-s STRING        selection of atoms\n");
+    printf("-s STRING        selection of atoms (default: all)\n");
     printf("-f STRING        xtc file to read (optional)\n");
     printf("-n STRING        ndx file to read (optional, default: index.ndx)\n");
     printf("-o STRING        output file name (default: selection.gro / selection.xtc)\n");
+    printf("-r STRING        reference atoms for geometry selection (optional)\n");
+    printf("-g STRING        query for geometry selection (optional)\n");
     printf("\n");
 }
 
@@ -112,10 +123,17 @@ int main(int argc, char **argv)
     char *ndx_file = "index.ndx";
     char *output_file = NULL;
     char *default_output = "selection";
-    char *selected = NULL;
+    char *selected = "all";
+    char *geometry_reference = NULL;
+    char *geometry_query = NULL;
 
-    if (get_arguments(argc, argv, &gro_file, &xtc_file, &ndx_file, &output_file, &selected) != 0) {
+    if (get_arguments(argc, argv, &gro_file, &xtc_file, &ndx_file, &output_file, &selected, &geometry_reference, &geometry_query) != 0) {
         print_usage(argv[0]);
+        return 1;
+    }
+
+    if (xtc_file != NULL && (geometry_query != NULL || geometry_reference != NULL)) {
+        fprintf(stderr, "Geometry selection from xtc file is currently not supported.\n");
         return 1;
     }
     
@@ -171,9 +189,9 @@ int main(int argc, char **argv)
     atom_selection_t *all = select_system(system);
 
     // select selected atoms
-    atom_selection_t *selection = smart_select(all, selected, ndx_groups);
+    atom_selection_t *selection = smart_geometry(all, selected, geometry_reference, geometry_query, ndx_groups, system->box);
     if (selection == NULL) {
-        fprintf(stderr, "Could not understand the selection query '%s'\n", selected);
+        fprintf(stderr, "Could not understand the selection query.\n");
 
         dict_destroy(ndx_groups);
         free(system);
@@ -184,7 +202,7 @@ int main(int argc, char **argv)
     }
 
     if (selection->n_atoms == 0) {
-        fprintf(stderr, "Warning. Selection query '%s' corresponds to no atoms.\n", selected);
+        fprintf(stderr, "Warning. Selection query corresponds to no atoms.\n");
     }
 
     // always prepare a gro file with the selected atoms
@@ -203,7 +221,7 @@ int main(int argc, char **argv)
     }
 
     char *comment = calloc(strlen(selected) + strlen(gro_file) + strlen(VERSION) + 200, 1);
-    sprintf(comment, "Generated with gselect (C Gromacs Selection Program) %s from file %s using selection query '%s'.", VERSION, gro_file, selected);
+    sprintf(comment, "Generated with gselect (C Gromacs Selection Program) %s from file %s.", VERSION, gro_file);
     write_gro(output, selection, system->box, velocities, comment);
     free(comment);
 
